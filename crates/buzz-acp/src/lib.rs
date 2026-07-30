@@ -3649,9 +3649,11 @@ mod agent_draft_prompt_tests {
         assert!(prompt.contains("kind `45001`"));
         assert!(prompt.contains("kind `45003`"));
         assert!(prompt.contains("stream default kind `9`"));
-        assert!(prompt.contains("if `[Context]` gives only a root event ID"));
+        assert!(prompt.contains("legacy kind-`40002` stream roots"));
+        assert!(prompt.contains("inspect the supplied `Thread root kind` in `[Context]`"));
+        assert!(prompt.contains("only if the kind is unavailable"));
         assert!(prompt.contains("buzz messages thread --channel <UUID> --event <root-id>"));
-        assert!(prompt.contains("Never send kind `45003` beneath a kind-`9` root"));
+        assert!(prompt.contains("Never send kind `45003` beneath kind-`9` or kind-`40002` roots"));
     }
 }
 

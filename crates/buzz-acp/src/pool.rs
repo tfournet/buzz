@@ -2792,6 +2792,7 @@ async fn fetch_thread_context(
         .kinds([
             nostr::Kind::Custom(buzz_core::kind::KIND_STREAM_MESSAGE as u16),
             nostr::Kind::Custom(buzz_core::kind::KIND_STREAM_MESSAGE_V2 as u16),
+            nostr::Kind::Custom(buzz_core::kind::KIND_FORUM_COMMENT as u16),
         ])
         .custom_tags(e_tag, [root_event_id])
         .custom_tags(h_tag, [ch_str.as_str()])
@@ -2907,6 +2908,7 @@ fn parse_thread_response(json: serde_json::Value) -> Option<ConversationContext>
         messages,
         total,
         truncated,
+        root_kind: None,
     })
 }
 
@@ -2984,12 +2986,17 @@ fn parse_nostr_thread_response(
 ) -> Option<ConversationContext> {
     let events = json.as_array()?;
     let mut root_msg = None;
+    let mut root_kind = None;
     let mut reply_msgs = Vec::new();
 
     for ev in events {
         let ev_id = ev.get("id").and_then(|v| v.as_str()).unwrap_or("");
         if let Some(msg) = json_to_context_message(ev) {
             if ev_id == root_event_id {
+                root_kind = ev
+                    .get("kind")
+                    .and_then(|value| value.as_u64())
+                    .and_then(|kind| u32::try_from(kind).ok());
                 root_msg = Some(msg);
             } else {
                 reply_msgs.push((
@@ -3018,6 +3025,7 @@ fn parse_nostr_thread_response(
         messages,
         total,
         truncated: false, // query returns all within limit
+        root_kind,
     })
 }
 
@@ -4006,6 +4014,40 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_nostr_thread_response_captures_root_kind() {
+        let root_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let json = json!([
+            {
+                "id": root_id,
+                "kind": 45001,
+                "pubkey": "pub1",
+                "content": "forum root",
+                "created_at": 1710518400
+            },
+            {
+                "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "kind": 45003,
+                "pubkey": "pub2",
+                "content": "forum reply",
+                "created_at": 1710518460
+            }
+        ]);
+
+        let ctx = parse_nostr_thread_response(json, root_id).expect("should parse");
+        match ctx {
+            ConversationContext::Thread {
+                messages,
+                root_kind,
+                ..
+            } => {
+                assert_eq!(root_kind, Some(45_001));
+                assert_eq!(messages[0].content, "forum root");
+            }
+            _ => panic!("expected Thread context"),
+        }
+    }
+
+    #[test]
     fn test_parse_thread_response_basic() {
         let json = json!({
             "root": {
@@ -4031,6 +4073,7 @@ mod tests {
                 messages,
                 total,
                 truncated,
+                ..
             } => {
                 assert_eq!(messages.len(), 2); // root + 1 reply
                 assert_eq!(total, 2); // 1 reply + 1 root
@@ -4068,6 +4111,7 @@ mod tests {
                 messages,
                 total,
                 truncated,
+                ..
             } => {
                 assert_eq!(messages.len(), 2);
                 assert_eq!(total, 11); // 10 replies + 1 root
@@ -4121,6 +4165,7 @@ mod tests {
                 messages,
                 total,
                 truncated,
+                ..
             } => {
                 // Should be reversed to chronological order.
                 assert_eq!(messages.len(), 2);
@@ -4265,6 +4310,7 @@ mod tests {
             }],
             total: 1,
             truncated: false,
+            root_kind: None,
         };
 
         let pubkeys = collect_prompt_pubkeys(&batch, Some(&context));
